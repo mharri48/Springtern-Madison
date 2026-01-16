@@ -3,7 +3,7 @@ import pandas as pd
 import os
 import re
 
-gradReportFolder = "/Users/mharris/Downloads/GraduationSurveyReports"
+gradReportFolder = None
 contEdTables = []
 print("script started")
 
@@ -274,13 +274,6 @@ for file in os.listdir(gradReportFolder):
 
 print(f"Found {len(contEdTables)} cont ed tables")
 
-# de-dupe 
-# unique = {}
-# for t in contEdTables:
-#     key = (t["school"], t["year"])
-#     if key not in unique:
-#         unique[key] = t
-# contEdTables = list(unique.values())
 
 # Regex for CSV creation
 COUNT = r"([\d,]+)"
@@ -403,4 +396,4 @@ for c in metric_cols:
         df[c] = ""
 
 df = df[["Unit","Year"] + metric_cols]
-df.to_csv("/Users/mharris/Downloads/continuing_education_week1.csv", index=False)
+df.to_csv(None, index=False)
