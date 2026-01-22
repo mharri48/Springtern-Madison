@@ -124,13 +124,30 @@ totalN = re.compile(
 # narrative (pre-2020 style)  --- DO NOT CHANGE
 #directReg = re.compile(r"directly\s+aligned.*?\(\s*(\d+(?:\.\d+)?)\s*%\s*\)", re.IGNORECASE | re.DOTALL)
 directReg = re.compile(r"directly\s+aligned.*?\(\s*(\d+(?:\.\d+)?)\s*%\s*\)",re.IGNORECASE | re.DOTALL)
-
+directRelatedReg=re.compile(r"directly\s+related.*?\(\s*(\d+(?:\.\d+)?)\s*%\s*\)",re.IGNORECASE | re.DOTALL)
 steppingReg = re.compile(r"stepping(?:\s*-\s*|\s+)?stone.*?\(\s*(\d+(?:\.\d+)?)\s*%\s*\)",re.IGNORECASE | re.DOTALL)
+#utilizesReg = re.compile(r"\butilizes\b.*?\(\s*(\d+(?:\.\d+)?)\s*%\s*\)",re.IGNORECASE | re.DOTALL)
+notRelatedReg=re.compile(r"not\s+at\s+all\s+related.*?\(\s*(\d+(?:\.\d+)?)\s*%\s*\)",re.IGNORECASE | re.DOTALL)
 
 paysBillsReg = re.compile(
     r"(?:pays\s+the\s+bills|not\s+at\s+all\s+related|unrelated).*?\(\s*(\d+(?:\.\d+)?)\s*%\s*\)",
     re.IGNORECASE | re.DOTALL
 )
+
+#utilizesReg = re.compile(r"\butilizes\b",re.IGNORECASE | re.DOTALL)
+utilizesReg = re.compile(
+    r"(?:"
+    r"\butilizes\b.*?\(\s*"                              # old years: "... utilizes ... ("
+    r"|"
+    r"\bIndirectly\s+related\b.*?"                       # 2024 chart label start
+    r"(?:\b\d+(?:\.\d+)?\s*%\s*)+"                       # skip the FIRST % (Directly related)
+    r")"
+    r"(\d+(?:\.\d+)?)\s*%\s*\)?",                        # CAPTURE the NEXT % (Indirectly related)
+    re.IGNORECASE | re.DOTALL
+)
+
+
+
 
 # chart-label fallback (post-2019 style)
 DIRECT_LBL = re.compile(r"\bEmployment\s+is\s+directly\s+aligned\b", re.IGNORECASE)
@@ -139,6 +156,14 @@ BILLS_LBL  = re.compile(
     r"\bpays\s+the\s+bills\b|\bunrelated\s+to\s+career\s+goals\b|\bPosition\s+simply\b|\bPosition\s+is\s+unrelated\b",
     re.IGNORECASE
 )
+FIELD_DIRECT_LBL = re.compile(r"\bDirectly\s+related\b", re.IGNORECASE)
+# matches the 2024 label split across lines (Indirectly related; uses UMD / education)
+FIELD_UTILIZES_LBL = re.compile(
+    r"\bIndirectly\s+related\b.*\buses\s+UMD\b|\buses\s+UMD\b.*\beducation\b",
+    re.IGNORECASE | re.DOTALL
+)
+FIELD_UNRELATED_LBL = re.compile(r"\bUnrelated\b", re.IGNORECASE)
+
 
 percentReq = re.compile(r"\bpercent\b|%", re.IGNORECASE)
 
@@ -322,6 +347,11 @@ def _pct_near_line(lines, idx, back=6, forward=2):
             if m:
                 return m.group(1)
     return None
+def pct_from_label(lines, label_pat, back=2, forward=8):
+    for i, ln in enumerate(lines):
+        if label_pat.search(ln):
+            return _pct_near_line(lines, i, back=back, forward=forward)
+    return None
 
 def pct_from_chart_labels(lines):
     direct = step = bills = None
@@ -417,11 +447,11 @@ def extract_post2020_block_from_header(page, next_page=None, post_lines=240):
     return block
 
 
-# extracts nature of position info from left side of the page only (for 2020-2023)
+# extracts nature of position info from left or right side of the page only (for 2020-2023)
 def extract_post2020_blocks_split_safe(page, next_page=None, post_lines=240):
     all_objs = build_line_objs_from_words(page)
     if not all_objs:
-        return None, None
+        return None, None, None
 
     start_idx = None
     for i, L in enumerate(all_objs):
@@ -429,7 +459,7 @@ def extract_post2020_blocks_split_safe(page, next_page=None, post_lines=240):
             start_idx = i
             break
     if start_idx is None:
-        return None, None
+        return None, None, None
 
     a = start_idx
     b = min(len(all_objs), start_idx + post_lines)
@@ -441,24 +471,38 @@ def extract_post2020_blocks_split_safe(page, next_page=None, post_lines=240):
     y0 = all_objs[a]["y"] - 3
     y1 = all_objs[b - 1]["y"] + 18
 
-    # left column cutoff
     mid = page.width / 2.0
 
+    # LEFT column
     left_objs = build_line_objs_from_words(page, x0_max=mid)
     left_lines = [x["text"] for x in left_objs if (y0 <= x["y"] <= y1)]
     left_lines = clip_at_stop(left_lines)
 
+    # RIGHT column
+    right_objs = build_line_objs_from_words(page, x0_min=mid)
+    right_lines = [x["text"] for x in right_objs if (y0 <= x["y"] <= y1)]
+    right_lines = clip_at_stop(right_lines)
+
     if next_page is not None:
         mid2 = next_page.width / 2.0
+
+        # extend LEFT
         left_next = build_line_objs_from_words(next_page, x0_max=mid2)
         left_lines.extend([x["text"] for x in left_next[:40]])
         left_lines = clip_at_stop(left_lines)
 
+        # extend RIGHT
+        right_next = build_line_objs_from_words(next_page, x0_min=mid2)
+        right_lines.extend([x["text"] for x in right_next[:40]])
+        right_lines = clip_at_stop(right_lines)
+
+        # extend ALL
         all_next = build_line_objs_from_words(next_page)
         all_lines.extend([x["text"] for x in all_next[:60]])
         all_lines = clip_at_stop(all_lines)
 
-    return left_lines, all_lines
+    return left_lines, right_lines, all_lines
+
 
 # summary sentence parsing (career-goals only)
 CAREER_GOALS = re.compile(r"\bcareer\s+goals?\b", re.IGNORECASE)
@@ -571,6 +615,20 @@ for file in os.listdir(gradReportFolder):
                     max_chars=450, require_pat=percentReq, tail_chars=260
                 )
 
+                directlyRelated=pct_nearest_anchor_same_sentence(
+                    joined, directRelatedReg, stop_pat=utilizesReg,
+                    max_chars=450, require_pat=percentReq, tail_chars=260, backScan=False
+                )
+                utilizesKnowledge=pct_nearest_anchor_same_sentence(
+                    joined, utilizesReg, stop_pat=notRelatedReg,
+                    max_chars=450, require_pat=percentReq, tail_chars=260, backScan=False
+                )
+
+                notRelated = pct_nearest_anchor_billpay(
+                    joined, notRelatedReg, stop_pat=salaryStop,
+                    max_chars=450, require_pat=percentReq, tail_chars=260
+                )
+
                 if directlyAligned is None or steppingStone is None or paysBills is None:
                     d2, s2, b2 = pct_from_chart_labels(window_lines)
                     if directlyAligned is None:
@@ -587,7 +645,7 @@ for file in os.listdir(gradReportFolder):
             # -----------------------------
             else:
                 if page_looks_split(page):
-                    left_lines, all_lines = extract_post2020_blocks_split_safe(
+                    left_lines, right_lines, all_lines = extract_post2020_blocks_split_safe(
                         page, next_page=next_page, post_lines=260
                     )
                     if not left_lines or not all_lines:
@@ -595,9 +653,26 @@ for file in os.listdir(gradReportFolder):
 
                     totalResponses = count_for_keyword(all_lines, totalN)
 
-                    # TRY full width first (fixes 2024)
                     joined_full = " ".join(all_lines)
                     directlyAligned, steppingStone = extract_direct_step_from_summary(joined_full)
+
+                    joined_right = " ".join(right_lines)
+
+                    directlyRelated = pct_nearest_anchor_same_sentence(
+                        joined_right, directRelatedReg, stop_pat=utilizesReg,
+                        max_chars=450, require_pat=percentReq, tail_chars=260, backScan=False
+                    )
+
+                    utilizesKnowledge = pct_nearest_anchor_same_sentence(
+                        joined_right, utilizesReg, stop_pat=notRelatedReg,
+                        max_chars=450, require_pat=percentReq, tail_chars=260, backScan=False
+                    )
+
+                    notRelated = pct_nearest_anchor_billpay(
+                        joined_right, notRelatedReg, stop_pat=salaryStop,
+                        max_chars=450, require_pat=percentReq, tail_chars=260
+                    )
+
 
                     # fallback to left only (fixes 2020-2023)
                     if directlyAligned is None or steppingStone is None:
@@ -608,6 +683,7 @@ for file in os.listdir(gradReportFolder):
                     post_lines = extract_post2020_block_from_header(page, next_page=next_page, post_lines=260)
                     if not post_lines:
                         continue
+                    
 
                     totalResponses = count_for_keyword(post_lines, totalN)
 
@@ -644,15 +720,23 @@ for file in os.listdir(gradReportFolder):
                     "Directly Aligned": None,
                     "Stepping Stone": None,
                     "Pays the Bills": None,
+                    "Directly Related": None,
+                    "Utilizes Knowledge/Skills":None,
+                    "Not Related": None,
                     "N": None
                 }
-            if directlyAligned == None and steppingStone == None and paysBills == None:
+            if directlyAligned == None and steppingStone == None:
                 totalResponses=""
+            if directlyRelated != None and utilizesKnowledge != None:
+                notRelated= 100 - int(directlyRelated)-int(utilizesKnowledge)
 
             row = year_unit_data[key]
             row["Directly Aligned"] = directlyAligned
             row["Stepping Stone"] = steppingStone
             row["Pays the Bills"] = paysBills
+            row["Directly Related"] = directlyRelated
+            row["Utilizes Knowledge/Skills"] = utilizesKnowledge
+            row["Not Related"] = notRelated
             row["N"] = totalResponses
 
             last_school_norm = school_norm
@@ -662,7 +746,7 @@ for file in os.listdir(gradReportFolder):
 years = sorted({int(year) for (year, _unit) in year_unit_data.keys()})
 template_rows = [{"Year": y, "Unit": u} for y in years for u in unit_order]
 
-metric_cols = ["Directly Aligned", "Stepping Stone", "Pays the Bills", "N"]
+metric_cols = ["Directly Aligned", "Stepping Stone", "Pays the Bills","Directly Related","Utilizes Knowledge/Skills","Not Related", "N"]
 
 final_rows = []
 for base in template_rows:
