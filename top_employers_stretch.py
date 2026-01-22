@@ -3,7 +3,7 @@ import pandas as pd
 import os
 import re
 
-gradReportFolder = "/Users/mharris/Downloads/GraduationSurveyReports"
+gradReportFolder = None
 
 # order for csv rows
 unit_order = [
@@ -282,6 +282,6 @@ for c in metric_cols:
         df[c] = ""
 
 df = df[["Unit", "Year"] + metric_cols]
-out_path = "/Users/mharris/Downloads/top_employers_stretch.csv"
+out_path = None
 df.to_csv(out_path, index=False)
 print("Wrote:", out_path)
